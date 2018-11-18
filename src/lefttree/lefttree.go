@@ -39,6 +39,28 @@ func findBottomLeftValueRec(root *TreeNode, height int) (int, int) {
 	}
 }
 
+func largestValues(root *TreeNode) []int {
+	// initialize a slice without elements
+	s := []int{}
+	// pass the slice recursively
+	return largestValuesRec(root, 0, s)
+}
+
+func largestValuesRec(root *TreeNode, depth int, s []int) []int {
+	if root == nil {
+		return s
+	}
+	if depth >= len(s) {
+		s = append(s, root.Val)
+	}
+	if s[depth] < root.Val {
+		s[depth] = root.Val
+	}
+	s = largestValuesRec(root.Left, depth+1, s)
+	s = largestValuesRec(root.Right, depth+1, s)
+	return s
+}
+
 func main() {
 	// 	        1
 	// 	       / \
@@ -56,4 +78,7 @@ func main() {
 	tree1 := &TreeNode{1, tree2, tree3}
 	res := findBottomLeftValue(tree1)
 	fmt.Printf("res: %d\n", res)
+
+	largestValues := largestValues(tree1)
+	fmt.Printf("largest values: %v", largestValues)
 }
