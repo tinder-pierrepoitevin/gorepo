@@ -1,17 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 func main() {
-	//countClassesDeps()
-	testMatchImport()
+	// countClassesDeps()
+	// testMatchImport()
+
+	uniqueJavaImportKeysFromArg()
 }
 
 func depsCount() {
@@ -187,12 +191,115 @@ func parseDependenciesAndMap(trimmed string, m map[string]int) {
 func matchImport(line string) bool {
 	pattern := "import\\s.*;"
 	matched, _ := regexp.MatchString(pattern, line)
+	if !strings.HasPrefix(line, "import ") {
+		return false
+	}
 	return matched
 }
 
-func parseJavaFileForImports(fileName string) []string {
+func uniqueJavaImportKeysFromArg() {
+	uniqueJavaImportKeys(os.Args[1])
+}
 
-	return []string{}
+func uniqueJavaImportKeys(dir string) {
+	m := make(map[string]bool)
+	crawlJavaUniqueImports(dir, m)
+	fmt.Printf("unique keys: %v\n", len(m))
+
+	keyToPackage := make(map[string]string)
+	missingMapping := make(map[string]bool)
+	for key := range m {
+		keyToPackage[key] = findBuildPackage(key, missingMapping)
+	}
+
+	// To store the keys in slice in sorted order
+	var missingKeys []string
+	for k := range missingMapping {
+		missingKeys = append(missingKeys, k)
+	}
+	sort.Strings(missingKeys)
+	for _, k := range missingKeys {
+		fmt.Printf("Key: %v\n", k)
+	}
+
+}
+
+func crawlJavaUniqueImports(dir string, res map[string]bool) {
+
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, f := range files {
+		if f.IsDir() {
+			crawlJavaUniqueImports(dir+"/"+f.Name(), res)
+		}
+		if strings.HasSuffix(f.Name(), ".java") {
+			toParse := dir + "/" + f.Name()
+			newImports := parseJavaFileForImports(toParse)
+			for _, str := range newImports {
+				res[str] = true
+			}
+		}
+	}
+}
+
+func parseJavaFileForImports(fileName string) []string {
+	res := []string{}
+	file, err := os.Open(fileName)
+	if err != nil {
+		fmt.Println("error reading file!", fileName)
+		return []string{}
+	}
+	reader := bufio.NewReader(file)
+	str := ""
+	for err == nil {
+		str, err = reader.ReadString('\n')
+		if err == nil && matchImport(str) {
+			if strings.HasPrefix(str, "import static ") {
+				res = append(res, strings.TrimPrefix(strings.TrimRight(str, ";\n"), "import static "))
+			} else {
+				res = append(res, strings.TrimPrefix(strings.TrimRight(str, ";\n"), "import "))
+			}
+		}
+	}
+	return res
+}
+
+func findBuildPackage(key string, missingMapping map[string]bool) string {
+	arr := strings.Split(key, ".")
+	nKey := strings.Join(arr[:len(arr)-1], ".")
+	if matchTinderBackend(nKey) {
+		return "backend/src/java/" + strings.Join(strings.Split(nKey, "."), "/")
+	}
+	if matchJava(nKey) {
+		// No need to add import in BUILD
+		return ""
+	}
+	missingMapping[nKey] = true
+	return nKey
+}
+
+func matchTinderBackend(key string) bool {
+	pattern := "com\\.tinder\\.backend\\.*"
+	matched, _ := regexp.MatchString(pattern, key)
+	return matched
+}
+
+func matchJava(key string) bool {
+	return matchJavaUtil(key) || matchJavaIO(key)
+}
+
+func matchJavaUtil(key string) bool {
+	pattern := "java\\.*"
+	matched, _ := regexp.MatchString(pattern, key)
+	return matched
+}
+
+func matchJavaIO(key string) bool {
+	pattern := "java\\.util\\.*"
+	matched, _ := regexp.MatchString(pattern, key)
+	return matched
 }
 
 func testMatchImport() {
@@ -208,4 +315,8 @@ func testMatchImport() {
 	fmt.Println("expected: true; actual: ", res)
 	res = matchImport("import java.util.List;\n")
 	fmt.Println("expected: true; actual: ", res)
+	res = matchImport("import static java.util.List;\n")
+	fmt.Println("expected: true; actual: ", res)
+	res = matchImport("LOGGER.info(\"success import docs\", keyValue(\"size\", bulkResponse.getItems().length));")
+	fmt.Println("expected: false; actual: ", res)
 }
