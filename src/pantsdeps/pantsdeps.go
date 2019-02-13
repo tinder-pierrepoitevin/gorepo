@@ -9,13 +9,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 func main() {
 	// countClassesDeps()
 	// testMatchImport()
 
-	uniqueJavaImportKeysFromArg()
+	packageImportsForDirectory()
 }
 
 func depsCount() {
@@ -197,6 +198,64 @@ func matchImport(line string) bool {
 	return matched
 }
 
+func packageImportsForDirectory() {
+	packageImports(os.Args[1])
+}
+
+func packageImports(dir string) {
+	// sorted sclice of keys
+	imports := getAllImports(dir)
+	// sorted deps for BUILD
+	buildDeps := getAllBuildDeps(imports)
+	for _, dep := range buildDeps {
+		fmt.Printf("'%v',\n", dep)
+	}
+}
+
+func getAllImports(dir string) []string {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	res := make(map[string]bool)
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".java") {
+			toParse := dir + "/" + f.Name()
+			newImports := parseJavaFileForImports(toParse)
+			for _, str := range newImports {
+				res[str] = true
+			}
+		}
+	}
+	var sortedKeys []string
+	for k := range res {
+		sortedKeys = append(sortedKeys, k)
+	}
+	sort.Strings(sortedKeys)
+	fmt.Printf("# unique imports: %v\n", len(sortedKeys))
+	return sortedKeys
+}
+
+func getAllBuildDeps(importKeys []string) []string {
+	res := make(map[string]bool)
+	missingKeys := make(map[string]bool)
+	for _, importKey := range importKeys {
+		newKey := findBuildPackage(importKey, missingKeys)
+		if newKey != "" {
+			res[newKey] = true
+		}
+	}
+	var sortedDeps []string
+	for k := range res {
+		sortedDeps = append(sortedDeps, k)
+	}
+	sort.Strings(sortedDeps)
+	for missingKey := range missingKeys {
+		fmt.Printf("Missing key: %v\n", missingKey)
+	}
+	return sortedDeps
+}
+
 func uniqueJavaImportKeysFromArg() {
 	uniqueJavaImportKeys(os.Args[1])
 }
@@ -268,7 +327,10 @@ func parseJavaFileForImports(fileName string) []string {
 
 func findBuildPackage(key string, missingMapping map[string]bool) string {
 	arr := strings.Split(key, ".")
-	nKey := strings.Join(arr[:len(arr)-1], ".")
+	for unicode.IsUpper([]rune(arr[len(arr)-1])[0]) {
+		arr = arr[:len(arr)-1]
+	}
+	nKey := strings.Join(arr, ".")
 	if matchTinderBackend(nKey) {
 		return "backend/src/java/" + strings.Join(strings.Split(nKey, "."), "/")
 	}
@@ -276,8 +338,30 @@ func findBuildPackage(key string, missingMapping map[string]bool) string {
 		// No need to add import in BUILD
 		return ""
 	}
+	if matchJacksonCore(nKey) {
+		return "3rdparty/jvm/com/fasterxml/jackson:core"
+	}
+	if matchHTTPClient(nKey) {
+		return "3rdparty/jvm/org/apache/httpcomponents:httpclient"
+	}
 	missingMapping[nKey] = true
 	return nKey
+}
+
+func matchHTTPClient(key string) bool {
+	pattern := "org\\.apache\\.http\\.client\\.*"
+	matched, _ := regexp.MatchString(pattern, key)
+	return matched
+}
+
+func matchJacksonCore(key string) bool {
+	return matchJacksonAnnotation(key)
+}
+
+func matchJacksonAnnotation(key string) bool {
+	pattern := "com\\.fasterxml\\.jackson\\.annotation\\.*"
+	matched, _ := regexp.MatchString(pattern, key)
+	return matched
 }
 
 func matchTinderBackend(key string) bool {
